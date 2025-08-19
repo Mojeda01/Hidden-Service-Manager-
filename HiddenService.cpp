@@ -331,8 +331,28 @@ bool HiddenServiceManager::delOnion(){
 bool HiddenServiceManager::closeControl() {
     // Future behavior:
     //  - Close socket/file descriptor and reset control_fd_.
-    std::cout << "[HiddenService] (skeleton) closeControl" << std::endl;
+    //std::cout << "[HiddenService] (skeleton) closeControl" << std::endl;
+    //control_fd_ = -1;
+    //return true;
+
+    if (config_.enable_stub_mode) {
+        std::cout << "[HiddenService] (stub) closeControl bypassed" << std::endl;
+        return true;
+    }
+
+    if (control_fd_ < 0) {
+        // Already closed or never opened. Make it idempotent.
+        std::cout << "[HiddenService] closeControl: no active ControlPort connection." << std::endl;
+        return true;
+    }
+
+    if (::close(control_fd_) < 0) {
+        std::cerr << "[HiddenService] closeControl: ::close() failed (errno=" << errno << ")" << std::endl;
+        return false;
+    }
+
     control_fd_ = -1;
+    std::cout << "[HiddenService] ControlPort connection closed." << std::endl;
     return true;
 }
 

@@ -8,7 +8,12 @@
 #include <iterator>     // istreambuf_iterator
 #include <vector>       // byte buffer
 #include <sstream>      // hex encode
-#include <iomanip>      // std::stew, std::setfill, std::hex
+#include <iomanip>      // std::setw, std::setfill, std::hex
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <unistd.h>   // close()
+#include <cstring>    // memset
 
 // ------------------------- Public API -------------------------
 
@@ -99,14 +104,50 @@ std::string HiddenServiceManager::onionAddress() const {
 // ------------------------- Private: high-level steps (skeleton stubs) -------------------------
 
 bool HiddenServiceManager::connectControl() {
-    // Skeleton rationale:
-    //  - We don't pick a socket library yet. This method will open a TCP connection to
-    //    config_.tor_control_host:config_.tor_control_port and set control_fd_.
-    //  - Returning false keeps the calling flow simple and explicit.
+    if (config_.enable_stub_mode) {
+        std::cout << "[HiddenService] (stub) connectControl bypassed" << std::endl;
+        control_fd_ = -1;
+        return true;
+    }
 
-    std::cout << "[HiddenService] (skeleton) connectControl -> " << config_.tor_control_host << ":" << config_.tor_control_port << std::endl;
-    control_fd_ = -1; // Not implemented yet.
-    return false;
+    // Resolve Tor control host + port
+    struct addrinfo hints;
+    std::memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;    // allow IPv4 or IPv6
+    hints.ai_socktype = SOCK_STREAM;    // TCP
+
+    struct addrinfo* res = nullptr;
+    int rc = getaddrinfo(config_.tor_control_host.c_str(),
+                         std::to_string(config_.tor_control_port).c_str(),
+                         &hints, &res);
+
+    if (rc != 0) {
+        std::cerr << "[HiddenService] connectControl: getaddrinfo failed: " << gai_strerror(rc) << std::endl;
+        return false;
+    }
+
+    int fd = -1;
+    struct addrinfo* rp;
+    for (rp = res; rp != nullptr; rp = rp->ai_next) {
+        fd = ::socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        if (fd == -1) continue;
+        if (::connect(fd, rp->ai_addr, rp->ai_addrlen) == 0) {
+            break;
+        }
+        ::close(fd);
+        fd = -1;
+    }
+    freeaddrinfo(res);
+
+    if (fd == -1) {
+        std::cerr << "[HiddenService] connectControl: failed to connect to "
+                  << config_.tor_control_host << ":" << config_.tor_control_port << std::endl;
+        return false;
+    }
+    control_fd_ = fd;
+    std::cout << "[HiddenService] connectControl: connected to "
+              << config_.tor_control_host << ":" << config_.tor_control_port << std::endl;
+    return true;
 }
 
 bool HiddenServiceManager::waitBootstrapped() {
@@ -216,7 +257,7 @@ bool HiddenServiceManager::authenticate() {
     // and success criteria so when sendCommand is implemented, this path becomes “real”
     // without changing authenticate().
     std::vector<std::string> reply;
-    const std::string cmd = "AUTHENTICATE" + cookie_hex + "\r\n";
+    const std::string cmd = "AUTHENTICATE " + cookie_hex + "\r\n";
 
     if (!sendCommand(cmd, reply)) {
         std::cerr << "[HiddenService] authenticate: sendCommand failed (no response)." << std::endl;
@@ -264,7 +305,7 @@ std::string HiddenServiceManager::maybeRedact (const std::string& s) const {
     return config_.redact_secrets_in_logs ? std::string{"[REDACTED]"} : s;
 }
 
-std::string HiddenServiceManager::makeDeterminsticStubId() const {
+std::string HiddenServiceManager::makeDeterministicStubId() const {
     // Why this approach:
     //  - We want a repeatable placeholder address that depends on config knobs,
     //    without trying to mimic a real 56-char v3 ID (which could mislead testing).

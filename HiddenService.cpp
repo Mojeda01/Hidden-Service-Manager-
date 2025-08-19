@@ -4,6 +4,11 @@
 #include <sstream>
 #include <iomanip>
 #include <functional> // std::hash
+#include <fstream>      // read Tor cookie
+#include <iterator>     // istreambuf_iterator
+#include <vector>       // byte buffer
+#include <sstream>      // hex encode
+#include <iomanip>      // std::stew, std::setfill, std::hex
 
 // ------------------------- Public API -------------------------
 
@@ -149,6 +154,99 @@ bool HiddenServiceManager::closeControl() {
     return true;
 }
 
+bool HiddenServiceManager::authenticate() {
+    // Stub bypass: keep the rest of the app runnable until ControlPort I/O lands.
+    if (config_.enable_stub_mode) {
+        std::cout << "[HiddenService] (stub) authenticate: Cookie mode bypassed" << std::endl;
+        return true;
+    }
+
+    // Only cookie mode is implemented in this step.
+    if (config_.auth_mode != AuthMode::Cookie){
+        std::cerr << "[HiddenService] authenticate: only Cookie mode is implemented in this step. "
+                  << "Selected mode is not Cookie." << std::endl;
+        return false;
+    }
+
+    // Precondition (design intent) : connectControl() should have successfully opened control_fd_
+    // before we try to authenticate. We don't enforce it here to keep concerns separated, but
+    // a defensive check can help during bring‑up.
+
+    if (control_fd_ < 0) {
+        std::cerr << "[HiddenService] authenticate: ControlPort not connected (control_fd_ < 0)." << std::endl;
+        return false;
+    }
+
+    // 1) Read Tor's control.authcookie (binary) from config_.tor_cookie_path
+    const std::string cookie_path = config_.tor_cookie_path;
+    std::ifstream in(cookie_path, std::ios::binary);
+    if (!in) {
+        std::cerr << "[HiddenService] authenticate: failed to open cookie file at "
+                  << maybeRedact(cookie_path) << std::endl;
+        return false;
+    }
+
+    std::vector<unsigned char> cookie_bytes (
+        (std::istreambuf_iterator<char>(in)),
+        std::istreambuf_iterator<char>()
+    );
+
+    if (cookie_bytes.empty()) {
+        std::cerr << "[HiddenService] authenticate: cookie file is empty at "
+                  << maybeRedact(cookie_path) << std::endl;
+        return false;
+    }
+
+    // 2) Hex-encode the cookie bytes for Tor's AUTHENTICATE command.
+    // Tor accepts hex (case-insensitive). We emit uppercase for readability.
+    auto hexEncode = [](const std::vector<unsigned char>& bytes) -> std::string {
+        std::ostringstream oss;
+        oss << std::uppercase << std::hex << std::setfill('0');
+        for (unsigned char b : bytes){
+            oss << std::setw(2) << static_cast<int>(b);
+        }
+        return oss.str();
+    };
+
+    const std::string cookie_hex = hexEncode(cookie_bytes);
+
+
+    // 3) Send AUTHENTICATE <hex>\r\n over the ControlPort and expect a 250 OK.
+    // NOTE: sendCommand is still a thin stub right now. This function wires the command
+    // and success criteria so when sendCommand is implemented, this path becomes “real”
+    // without changing authenticate().
+    std::vector<std::string> reply;
+    const std::string cmd = "AUTHENTICATE" + cookie_hex + "\r\n";
+
+    if (!sendCommand(cmd, reply)) {
+        std::cerr << "[HiddenService] authenticate: sendCommand failed (no response)." << std::endl;
+        return false;
+    }
+
+    // Parse for a success line. Tor replies with "250 OK" on success.
+    bool ok = false;
+    for (const std::string& line  : reply) {
+        // Defensive trim not added to avoid extra utilities; ControlPort lines typically end with CRLF.
+        if (line.rfind("250", 0) == 0) {    // starts with "250"
+            ok = true;
+            break;
+        }
+        if (line.rfind("5",0) == 0) { // any 5xx indicates an error
+            ok = false;
+            break;
+        }
+    }
+
+    if (!ok){
+        std::cerr << "[HiddenService] authenticate: Tor did not return 250 OK (got "
+                  << (reply.empty() ? "no lines" : "non‑success response") << ")." << std::endl;
+        return false;
+    }
+
+    std::cout << "[HiddenService] authenticate: Cookie authentication succeeded." << std::endl;
+    return true;
+}
+
 // ------------------------- Private: low-level helpers (skeleton stubs) -------------------------
 
 bool HiddenServiceManager::sendCommand(const std::string& command, std::vector<std::string>& response_lines) {
@@ -178,7 +276,6 @@ std::string HiddenServiceManager::makeDeterminsticStubId() const {
     // Produce a short, readable token (not a real onion ID).
     oss << "stub-" << std::hex << std::setw(8) << std::setfill('0') << (static_cast<unsigned>(h) & 0xFFFFFFFFu);
     return oss.str();   // e.g., "stub-deadbeef".
-
 }
 
 

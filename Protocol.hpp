@@ -10,4 +10,3 @@ public:
     virtual std::string prepareOutgoing(const std::string& data) = 0;
 };
 
-// protocol skeleton

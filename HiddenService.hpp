@@ -167,7 +167,7 @@ private:
     Config config_;
 
     // Connection state (opaque in the skeleton; will become a socket/FD later).
-    int control_fd = -1;
+    int control_fd_ = -1;
 
     // Onion state.
     std::string service_id_;    //  Base32 v3 ID (no ".onion").
@@ -177,6 +177,13 @@ private:
     // Disallow copy to avoid double teardown; allow move later if needed.
     HiddenServiceManager(const HiddenServiceManager&) = delete;
     HiddenServiceManager& operator = (const HiddenServiceManager&) = delete;
+
+// Redacts secrets in logs; simple skeleton helper so calls compile cleanly.
+private:
+    std::string maybeRedact(const std::string& s) const;
+
+    // Deterministic stub generator for onion service ID (used in stub mode).
+    std::string makeDeterminsticStubId() const;
 };
 
 

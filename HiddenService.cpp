@@ -210,13 +210,82 @@ bool HiddenServiceManager::addOnion() {
     //    Save <id> and optionally <base64> (securely) if you want to persist later.
     //  - If ProvidedKey: "ADD_ONION ED25519-V3:<base64> Port=..."
     //    Expect ServiceID only; key is already known.
-    std::cout << "[HiddenService] (skeleton) addOnion virt_port=" << config_.onion_virtual_port
+    /*std::cout << "[HiddenService] (skeleton) addOnion virt_port=" << config_.onion_virtual_port
               << " -> " << config_.local_bind_ip << ":" << config_.local_service_port
               << " persistence=" << (config_.persistence_mode == PersistenceMode::Ephemeral ? "ephemeral" : "provided-key")
-              << std::endl;
+              << std::endl;*/
 
     // Indicate failure in skeleton so callers do not mistake this for a working implementation.
-    return false;
+    // return false;
+
+    // Dev convenience allow running without Tor
+    if (config_.enable_stub_mode){
+        service_id_= makeDeterministicStubId();
+        std::cout << "[HiddenService] (Stub) addOnion -> " << onionAddress() << std::endl;
+        return true;
+    }
+
+    if (control_fd_ < 0) {
+        std::cerr << "[HiddenService] addOnion: control_fd_ < 0 (not connected)" << std::endl;
+        return false;
+    }
+
+    // Build ADD_ONION command.
+    // Why we keep it explicit here:
+    //  - Easy to reason about VPORT -> local_ip:local_port mapping.
+    //  - Keeps future flags (e.g., Flags=DiscardPK) obvious if you add them later.
+    std::ostringstream oss;
+
+    if (config_.persistence_mode == PersistenceMode::Ephemeral) {
+        oss << "ADD_ONION NEW:ED25519-V3 "
+            << "Port=" << config_.onion_virtual_port << ","
+            << config_.local_bind_ip << ":" << config_.local_service_port
+            << "\r\n";
+    } else {    // Persistencemode::ProvidedKey
+        if (config_.provided_private_key_base64.empty()) {
+            std::cerr << "[HiddenService] addOnion: ProvidedKey mode but key is empty" << std::endl;
+            return false;
+        }
+        oss << "ADD_ONION ED25519-V3:" << config_.provided_private_key_base64 << " "
+            << "Port=" << config_.onion_virtual_port << ","
+            << config_.local_bind_ip << ":" << config_.local_service_port
+            << "\r\n";
+    }
+
+    std::vector<std::string> reply;
+    if (!sendCommand(oss.str(), reply)){
+        std::cerr << "[HiddenService] addOnion: ControlPort returned failure" << std::endl;
+        return false;
+    }
+
+    // Parse Tor's multiple success:
+    //    250-ServiceID=<id>
+    //    250-PrivateKey=ED25519-V3:<base64>   (only on NEW)
+    //    250 OK
+
+    std::string out_service_id;
+    std::string out_private_key;
+
+    for (const auto& line : reply) {
+        if (line.rfind("250-ServiceId=", 0) == 0) {
+            out_service_id = line.substr(std::string("250-ServiceID=").size());
+        } else if (line.rfind("250-PrivateKey=", 0) == 0){
+            out_private_key = line.substr(std::string("250-PrivateKey=").size());
+        }
+    }
+
+    if (out_service_id.empty()){
+        std::cerr << "[HiddenService] addOnion: ServiceID not found in reply" << std::endl;
+        return false;
+    }
+
+    service_id_ = out_service_id;
+    if (config_.persistence_mode == PersistenceMode::Ephemeral && !out_private_key.empty()){
+        // Store it for potential future persistence; do NOT log it.
+        private_key_ = out_private_key;
+    }
+    std::cout << "[HiddenService] ADD_ONION created: " << onionAddress() << std::endl;
+    return true;
 }
 
 bool HiddenServiceManager::delOnion(){

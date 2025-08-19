@@ -291,8 +291,41 @@ bool HiddenServiceManager::addOnion() {
 bool HiddenServiceManager::delOnion(){
     // Future behavior:
     //  - Close socket/file descriptor and reset control_fd_.
-    std::cout << "[HiddenService] (skeleton) closeControl" << std::endl;
-    return false;
+    //std::cout << "[HiddenService] (skeleton) closeControl" << std::endl;
+    //return false;
+
+    // Dev convenience: in stub mode there's nothing to remove from Tor.
+    if (config_.enable_stub_mode) {
+        std::cout << "[HiddenService] (stub) delOnion for " << onionAddress() << std::endl;
+        return true;
+    }
+
+    // If we never created a service (or it was already cleared), there's nothing to delete.
+    if (service_id_.empty()) {
+        std::cout << "[HiddenService] delOnion: no active ServiceID; nothing to delete." << std::endl;
+        return true;
+    }
+
+    if (control_fd_ < 0) {
+        std::cerr << "[HiddenService] delOnion: control_fd_ < 0 (not connected)" << std::endl;
+        return false;
+    }
+
+    // Build and send DEL_ONION <ServiceID>\r\n. Tor replies with "250 OK" on success.
+    std::vector<std::string> reply;
+    const std::string cmd = "DEL_ONION" + service_id_ + "\r\n";
+    if (!sendCommand(cmd, reply)){
+        std::cerr << "[HiddenService] DEL_ONION failed for " << onionAddress() << std::endl;
+        return false;
+    }
+
+    std::cout << "[HiddenService] DEL_ONION removed: " << onionAddress() << std::endl;
+
+    // Local cleanup: clear identifiers so repeated teardown is idempotent.
+    service_id_.clear();
+    private_key_.clear();
+    return true;
+
 }
 
 bool HiddenServiceManager::closeControl() {

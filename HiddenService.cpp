@@ -13,7 +13,8 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <unistd.h>   // close()
-#include <cstring>    // memset
+#include <cstring>    //
+#include <thread>
 
 // ------------------------- Public API -------------------------
 
@@ -151,14 +152,52 @@ bool HiddenServiceManager::connectControl() {
 }
 
 bool HiddenServiceManager::waitBootstrapped() {
-    // Future behavior:
-    //  - Poll GETINFO status/bootstrap-phase until progress=100 or timeout.
-    //  - This avoids racing against Tor startup on cold boots.
+    if (config_.enable_stub_mode) {
+        std::cout << "[HiddenService] (stub) waitBootstrapped bypassed" << std::endl;
+        return true;
+    }
 
-    std::cout << "[HiddenService] (skeleton) waitBootstrapped up to"
-              << std::chrono::duration_cast<std::chrono::milliseconds>(config_.bootstrap_timeout).count()
-              << " ms." << std::endl;
-    return false;
+    if (control_fd_ < 0) {
+        std::cerr << "[HiddenService] waitBootstrapped: control_fd_ < 0 (not connected)" << std::endl;
+        return false;
+    }
+
+    auto start = std::chrono::steady_clock::now();
+    while (true){
+        std::vector<std::string> reply;
+        if (!sendCommand("GETINFO status/bootstrap-phase\r\n", reply)) {
+            std::cerr << "[HiddenService] waitBootstrapped: GETINFO failed" << std::endl;
+            return false;
+        }
+
+        // look through reply lines for PROGRESS.
+        for (const auto& line : reply){
+            // Tor returns lines like: "250-status/bootstrap-phase=NOTICE BOOTSTRAP PROGRESS=100 ..."
+            if (line.find("PROGRESS=") != std::string::npos) {
+                std::size_t pos = line.find("PROGRESS=");
+                if (pos != std::string::npos) {
+                    int progress = std::atoi(line.c_str() + pos + 9);
+                    std::cout << "[HiddenService] Bootstrap progress=" << progress << "%" << std::endl;
+                    if (progress >= 100) {
+                        return true; // bootstrapped!
+                    }
+                }
+            }
+        }
+
+        // Check timeout.
+        auto now = std::chrono::steady_clock::now();
+        if (now - start > config_.bootstrap_timeout){
+            std::cerr << "[HiddenService] waitBootstrapped: timeout ("
+                      << std::chrono::duration_cast<std::chrono::milliseconds>(
+                             config_.bootstrap_timeout).count()
+                      << " ms)" << std::endl;
+            return false;
+        }
+
+        // Sleep a little before polling again
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
 }
 
 bool HiddenServiceManager::addOnion() {

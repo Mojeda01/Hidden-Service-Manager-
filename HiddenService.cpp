@@ -291,14 +291,107 @@ bool HiddenServiceManager::authenticate() {
 // ------------------------- Private: low-level helpers (skeleton stubs) -------------------------
 
 bool HiddenServiceManager::sendCommand(const std::string& command, std::vector<std::string>& response_lines) {
-    // Future behavior:
-    //  - Write the Tor control command + CRLF.
-    //  - Read lines until a "250 " or "5xx " final line.
-    //  - Populate response_lines with all lines (for parsing in callers).
-    (void) command;
+    // Safety: caller must have connected first.
+    if (config_.enable_stub_mode) {
+        // In stub mode we don't actually talk to Tor; pretend send/recv succeeded.
+        response_lines.clear();
+        response_lines.emplace_back("250 OK");
+        std::cout << "[HiddenService] (stub) sendCommand: " << command;
+        return true;
+    }
+
+    if (control_fd_ < 0) {
+        std::cerr << "[HiddenService] sendCommand: control_fd_ < 0 (not connected)" << std::endl;
+        return false;
+    }
+
+    // 1) write the entire command string (caller must include trailing \r\n).
+    {
+        const char* data = command.data();
+        std::size_t total = command.size();
+        while (total > 0) {
+            ssize_t n = ::write(control_fd_, data, total);
+            if (n < 0) {
+                if (errno == EINTR) continue; // Interrupted by signal; retry.
+                std::cerr << "[HiddenService] sendCommand: write() failed (errno=" << errno << ")" << std::endl;
+                return false;
+            }
+            data += static_cast<std::size_t>(n);
+            total -= static_cast<std::size_t>(n);
+        }
+    }
+    // 2) Read lines until Tor sends a final reply line.
+    // Tor control replies:
+    //   250-... (continuation)
+    //   250 OK  (final success)  -> space after code means final
+    //   5xx ... (final error)
+    auto is_final_line = [] (const std::string& line) -> bool {
+        // Need at least "250 " (4 chars). Tor also may emit "650 " for events; we still treat space as final.
+        if (line.size() < 4) return false;
+        // Three digits + either ' ' (final) or '-' (more lines).
+        if (!std::isdigit(static_cast<unsigned char>(line[0])) ||
+            !std::isdigit(static_cast<unsigned char>(line[1])) ||
+            !std::isdigit(static_cast<unsigned char>(line[2])))
+            return false;
+        return line[3] == ' '; // space => final; '-' => continuation
+    };
+
+    auto is_success_2xx = [](const std::string& line) -> bool {
+        return line.size() >= 3 && line[0] == '2';
+    };
+
     response_lines.clear();
-    std::cout << "[HiddenService] (skeleton) sendCommand: " << command << std::endl;
-    return false;
+    std::string buffer;             // accumulate bytes across read() calls
+    std::string pending_line;       // not strictly needed, but keeps intent clear
+
+    constexpr std::size_t kBufSz = 4096;
+    char io[kBufSz];
+
+    bool got_final = false;
+    bool final_success = false;
+
+    for (;;) {
+        ssize_t n = ::read(control_fd_, io, kBufSz);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            std::cerr << "[HiddenService] sendCommand: read() failed (errno=" << errno << ")" << std::endl;
+            return false;
+        }
+        if (n == 0) {
+            // Peer closed connection unexpectedly before final line.
+            std::cerr << "[HiddenService] sendCommand: EOF before final reply" << std::endl;
+            return false;
+        }
+
+        buffer.append(io, static_cast<std::size_t>(n));
+
+        // Extract complete CRLF-terminated lines.
+        std::size_t start = 0;
+        for (;;) {
+            std::size_t pos = buffer.find("\r\n", start);
+            if (pos == std::string::npos) {
+                // Keep leftover (from 'start') for next read.
+                buffer.erase(0, start);
+                break;
+            }
+
+            std::string line = buffer.substr(start, pos - start);
+            response_lines.emplace_back(line);
+
+            // Check if this is a final line (250<space>... or 5xx<space>...).
+            if (is_final_line(line)) {
+                got_final = true;
+                final_success = is_success_2xx(line);
+            }
+            start = pos + 2; // skip CRLF and continue scanning within the current buffer.
+        }
+        if (got_final) break; // We’ve collected the full reply.
+    }
+    // Optional: log last line for quick debugging (redact if needed elsewhere).
+    if (!response_lines.empty()) {
+        std::cout << "[HiddenService] <-- " << response_lines.back() << std::endl;
+    }
+    return final_success;
 }
 
 std::string HiddenServiceManager::maybeRedact (const std::string& s) const {

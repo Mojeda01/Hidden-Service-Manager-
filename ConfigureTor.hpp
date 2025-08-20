@@ -82,7 +82,8 @@ public:
     const Settings& settings() const noexcept { return settings_; }
 
     std::string dirnameOf(const std::string& p);
-    bool probeTcpConnect(const std::string& host, unsigned short port, std::chrono::milliseconds timeout_ms);
+    std::string dirnameof(const std::string& p);
+    static bool probeTcpConnect(const std::string& host, unsigned short port, std::chrono::milliseconds timeout_ms);
 
 private:
     // ---- Step helpers (single-responsibility; small & testable) ---
@@ -94,16 +95,13 @@ private:
     bool waitForCookie(std::string& out_error);
     bool waitForControlPort(std::string& out_error);
 
+
     // --- Utilities
     static bool fileExists(const std::string& p);
     static bool dirExists(const std::string& p);
     static bool mkDirs0700(const std::string& p, std::string& out_error);
     static bool isReadableFile(const std::string& p);
     static bool isExecutableFile(const std::string& p);
-    static std::string dirnameof(const std::string& p);
-
-    // TCP probe (blocking, minimal).
-    static bool probeTcpConnect(const std::string& host, unsigned short port, std::chrono::milliseconds timeout_ms);
 
     bool spawnTor();
 

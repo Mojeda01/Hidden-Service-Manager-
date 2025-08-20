@@ -83,13 +83,13 @@ bool ConfigureTor::ensureDataDirectory(std::string& out_error) {
 
     // If caller wants explicit CookieAuthFile, ensure its parent exists
     if (!paths_.cookie_path.empty()){
-        const std::string cookie_dir = dirnameof(paths_.cookie_path);
+        const std::string cookie_dir = dirnameOf(paths_.cookie_path);
         if (!mkDirs0700(cookie_dir, out_error)) return false;
     }
 
     // Ensure log directory if a log file was requested.
     if (!paths_.log_file.empty()){
-        const std::string log_dir = dirnameof(paths_.log_file);
+        const std::string log_dir = dirnameOf(paths_.log_file);
         if (!mkDirs0700(log_dir, out_error)) return false;
     }
     return true;
@@ -242,7 +242,7 @@ bool ConfigureTor::isExecutableFile(const std::string& p) {
     return (::access(p.c_str(), X_OK) == 0);
 }
 
-std::string ConfigureTor::dirnameof(const std::string& p) {
+std::string ConfigureTor::dirnameOf(const std::string& p) {
     auto pos = p.find_last_not_of('/');
     if (pos == std::string::npos) return ".";
     if (pos == 0) return "/";
@@ -300,24 +300,53 @@ bool ConfigureTor::probeTcpConnect(const std::string& host, unsigned short port,
     return ok;
 }
 
+/*
+ * @brief Quick probe to check if the Tor ControlPort is already up.
+ *
+ * Why: ensureConfigured() calls this before deciding to spawn Tor, so we must
+ * keep it cheap and non-blocking. We probe localhost with a short timeout to
+ * avoid delaying cold starts; a longer wait happens in waitForControlPort().
+ */
+bool ConfigureTor::controlPortOpen() const {
+    const std::chrono::milliseconds kQuickProbe{200};   // short, non-blocking-ish
+    return ConfigureTor::probeTcpConnect("127.0.0.1", settings_.control_port, kQuickProbe);
+}
 
 
+/*
+ * @brief Poll until the ControlPort accepts TCP connections, or timeout.
+ *
+ * Why: On cold starts Tor needs a moment to bind ControlPort. We poll with a
+ * small sleep to avoid busy-waiting. Any longer/harder waits should happen here
+ * (not in controlPortOpen()) to keep the fast-path snappy.
+ */
+bool ConfigureTor::waitForControlPort(std::string& out_error){
+    const auto deadline = std::chrono::steady_clock::now() + settings_.connect_control_timeout;
+    const std::chrono::milliseconds kStep{250};
 
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (ConfigureTor::probeTcpConnect("127.0.0.1", settings_.control_port, std::chrono::milliseconds{500})){
+            return true;
+        }
+        std::this_thread::sleep_for(kStep);
+    }
 
+    out_error = "Timed out waiting for Tor ControlPort at 127.0.0.1:" +
+                std::to_string(settings_.control_port) +
+                ". Check torrc and logs";
+    return false;
+}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*
+ * @brief Private helper expected by callers that currently use `dirnameof(...)`.
+ *
+ * Why: The file defines dirnameOf(...) (capital 'O') but some call sites use
+ * dirnameof(...) (lowercase 'f'). Providing this wrapper preserves current call
+ * sites without changing public behavior.
+ */
+std::string ConfigureTor::dirnameof(const std::string& p) {
+    return dirnameOf(p);
+}
 
 
 

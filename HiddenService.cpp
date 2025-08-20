@@ -21,49 +21,47 @@
 HiddenServiceManager::HiddenServiceManager(Config cfg) : config_(std::move(cfg)) {}
 
 bool HiddenServiceManager::setupHiddenService () {
-    // Stub-first policy:
-    // We deliberately let teams wire up the rest of the app without Tor installed.
-    // Flip Config::enable_stub_mode=false once you're ready to exercise the real control flow.
-
-    if (config_.enable_stub_mode){
+    // Stub-first: allow wiring the rest of the app without Tor installed.
+    if (config_.enable_stub_mode) {
         service_id_ = makeDeterministicStubId();
         ready_ = !service_id_.empty();
-        std::cout << "[HiddenService] STUB mode active. Using fake address: " << onionAddress() << std::endl;
+        std::cout << "[HiddenService] STUB mode active. Using fake address" << onionAddress() << std::endl;
         return ready_;
     }
 
-    // --- Real control flow (skeleton; not implemented yet) ---
-    // Each step returns false with a meaningful log if it cannot proceed.
-
+    // Open Controlport TCP connection.
     if (!connectControl()) {
-        std::cerr << "[HiddenService] Failed to connect to Tor ControlPort at " << config_.tor_control_host << ":" << config_.tor_control_port << std::endl;
+        std::cerr << "[HiddenService] STUB mode active. using fake address: " << onionAddress() << std::endl;
+        return ready_;
+    }
+
+    // Authenticate (Cookie mode currently implemented).
+    if (!authenticate()){
+        std::cerr << "[HiddenService] Authentication to Tor ControlPort failed." << std::endl;
+        closeControl(); // Best-effort cleanup
         return false;
     }
 
-    if (!authenticate()){
-        std::cerr << "[HiddenService] Authentication to Tor ControlPort failed "
+    // Wait for Tor Bootstrap to complete; avoids racing ADD_ONION on cold starts.
+    if (!waitBootstrapped()) {
+        std::cerr << "[HiddenService] Tor did not finish bootstrap within "
                   << std::chrono::duration_cast<std::chrono::milliseconds>(config_.bootstrap_timeout).count()
                   << " ms." << std::endl;
         closeControl();
         return false;
     }
 
-    if (!addOnion()){
+    // Register hidden service; expect ServiceID back on success.
+    if (!addOnion()) {
         std::cerr << "[HiddenService] ADD_ONION command failed." << std::endl;
         closeControl();
         return false;
     }
 
-    // At this point service_id_ should be populated by addOnion().
+    // Success: we keep the control connection open so teardown can DEL_ONION later.
     ready_ = !service_id_.empty();
-
-    // We intentionally keep the control connection open in the skeleton so that DEL_ONION
-    // can be issued on teardown. In a real impl, you may choose to close earlier
-    // if you don't need to stream events.
-
-    std::cout << "[HiddenService] Ready at" << onionAddress() << std::endl;
+    std::cout << "[HiddenService] ready at" << onionAddress() << std::endl;
     return ready_;
-
 }
 
 bool HiddenServiceManager::teardownHiddenService(){
@@ -572,19 +570,3 @@ std::string HiddenServiceManager::makeDeterministicStubId() const {
     oss << "stub-" << std::hex << std::setw(8) << std::setfill('0') << (static_cast<unsigned>(h) & 0xFFFFFFFFu);
     return oss.str();   // e.g., "stub-deadbeef".
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

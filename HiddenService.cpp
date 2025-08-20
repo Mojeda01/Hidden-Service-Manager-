@@ -570,3 +570,38 @@ std::string HiddenServiceManager::makeDeterministicStubId() const {
     oss << "stub-" << std::hex << std::setw(8) << std::setfill('0') << (static_cast<unsigned>(h) & 0xFFFFFFFFu);
     return oss.str();   // e.g., "stub-deadbeef".
 }
+
+bool HiddenServiceManager::integrationTestAddOnion(std::string& out_onion) {
+    // Why: connectControl must come first; all further steps require a live socket.
+    if (!connectControl()) return false;
+
+    // Why: authentication is mandatory before any privileged commands (ADD_ONION).
+    if (!authenticate()) return false;
+
+    // Why: even if Tor is running, we must wait until the bootstrap process reaches 100%.
+    if (!waitBootstrapped()) return false;
+
+    // Why: onion creation is the critical capability under test.
+    // addOnion() is already designed to populate an internal member (likely service_id_).
+    if (!addOnion()) return false;
+
+    // Retrieve the onion address from the manager’s state.
+    // (Assumes you have a getter for the most recently added onion service.)
+    out_onion = service_id_;   // <-- adjust this if your class uses a different member name
+
+    // Clean up immediately so repeated tests don’t leave lingering services.
+    delOnion();
+
+    // Always close the connection, even on success, to avoid leaking file descriptors.
+    closeControl();
+
+    return true;
+}
+
+
+
+
+
+
+
+

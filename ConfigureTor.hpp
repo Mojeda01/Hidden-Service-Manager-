@@ -81,29 +81,61 @@ public:
     const Paths& paths() const noexcept { return paths_; }
     const Settings& settings() const noexcept { return settings_; }
 
-    std::string dirnameOf(const std::string& p);
-    std::string dirnameof(const std::string& p);
-    static bool probeTcpConnect(const std::string& host, unsigned short port, std::chrono::milliseconds timeout_ms);
-
 private:
     // ---- Step helpers (single-responsibility; small & testable) ---
+    /*
+    * @brief Non-blocking-ish probe to see if Tor's ControlPort is already open.
+    * @details Kept const so callers (ensureConfigured) can check readiness without mutating state.
+    *          We do a very short TCP probe to avoid delaying startup; longer waits happen in
+    *          waitForControlPort().
+    */
+    bool controlPortOpen() const;
+
+    /*
+    * @brief Poll for the ControlPort to become reachable after spawn, within timeout.
+    * @param out_error A precise, human-readable reason if the port never becomes reachable.
+    * @return true on success (reachable), false on timeout/failure.
+    * @why Separate from controlPortOpen(): avoids mixing a quick probe with a blocking wait.
+    */
+    bool waitForControlPort(std::string& out_error);
+
+    /*
+    * @brief Ensure tor binary exists/exec, DataDirectory/torrc correctness, spawn if needed,
+    *        wait for cookie and reachable ControlPort.
+    * @contract Does not silently swallow errors; all failures return false + set out_error.
+    */
+
     bool ensureTorBinary(std::string& out_error);
     bool ensureDataDirectory(std::string& out_error);
     bool ensureTorrc(std::string& out_error);
-    bool controlPortOpen() const;
     bool spawnTor(std::string& out_error);
     bool waitForCookie(std::string& out_error);
-    bool waitForControlPort(std::string& out_error);
-
 
     // --- Utilities
+    /*
+    * @brief Minimal file/dir utilities kept static to avoid object coupling.
+    * @why  These routines don't depend on instance state and can be used from const methods safely.
+    */
     static bool fileExists(const std::string& p);
     static bool dirExists(const std::string& p);
     static bool mkDirs0700(const std::string& p, std::string& out_error);
     static bool isReadableFile(const std::string& p);
     static bool isExecutableFile(const std::string& p);
 
-    bool spawnTor();
+    /*
+    * @brief Blocking TCP connect probe with timeout, for IPv4/IPv6.
+    * @why  Static: no instance state; allows calls from const methods without const-casting.
+    */
+    static bool probeTcpConnect(const std::string& host,
+                                unsigned short port,
+                                std::chrono::milliseconds timeout_ms);
+
+    /*
+    * @brief Canonical dirname helper (string-only; no std::filesystem dependency).
+    * @notes Some call sites used dirnameof(...). Keep a thin wrapper to preserve compatibility.
+    */
+    static std::string dirnameOf(const std::string& p);
+    static inline std::string dirnameof(const std::string& p) { return dirnameOf(p); }
 
     Paths paths_;
     Settings settings_;

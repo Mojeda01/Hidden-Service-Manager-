@@ -242,13 +242,6 @@ bool ConfigureTor::isExecutableFile(const std::string& p) {
     return (::access(p.c_str(), X_OK) == 0);
 }
 
-std::string ConfigureTor::dirnameOf(const std::string& p) {
-    auto pos = p.find_last_not_of('/');
-    if (pos == std::string::npos) return ".";
-    if (pos == 0) return "/";
-    return p.substr(0, pos);
-}
-
 bool ConfigureTor::probeTcpConnect(const std::string& host, unsigned short port, std::chrono::milliseconds timeout_ms){
 
     // Resolve
@@ -338,17 +331,27 @@ bool ConfigureTor::waitForControlPort(std::string& out_error){
 }
 
 /*
- * @brief Private helper expected by callers that currently use `dirnameof(...)`.
- *
- * Why: The file defines dirnameOf(...) (capital 'O') but some call sites use
- * dirnameof(...) (lowercase 'f'). Providing this wrapper preserves current call
- * sites without changing public behavior.
+ * @brief Return the parent directory of path p (POSIX style), without std::filesystem.
+ * @why   We avoid <filesystem> to control permissions and keep headers lean.
+ * @notes Behaves like dirname(3) for common cases:
+ *        - ""           -> "."
+ *        - "file"       -> "."
+ *        - "/file"      -> "/"
+ *        - "/a/b"       -> "/a"
+ *        - "/a/b/"      -> "/a"   (trims trailing slashes first)
  */
-std::string ConfigureTor::dirnameof(const std::string& p) {
-    return dirnameOf(p);
+
+std::string ConfigureTor::dirnameOf(const std::string& p ) {
+    if (p.empty()) return ".";
+    // Trim trailing slashes (but keep one if it's just "/")
+    std::size_t end = p.find_last_not_of('/');
+    if (end == std::string::npos) return "/";               // p is all slashes
+    // Find the slash that separates parent from basename
+    std::size_t slash = p.rfind('/', end);
+    if (slash == std::string::npos) return ".";             // no slash at all
+    if (slash == 0) return "/";                             // parent is root
+    return p.substr(0, slash);
 }
-
-
 
 
 

@@ -131,6 +131,34 @@ public:
      */
     bool isReady() const noexcept { return ready_; }
 
+    /*
+     * @brief End-to-end integration test hook for onion service lifecycle.
+     *
+     * @details This method exists primarily to support TorUnitTests. It exercises the
+     *          complete hidden service setup sequence against a real Tor ControlPort:
+     *          - Connect to ControlPort
+     *          - Authenticate using cookie auth
+     *          - Wait until Tor reports fully bootstrapped
+     *          - Request creation of an ephemeral v3 onion service
+     *          - Remove the service again to leave Tor in a clean state
+     *          - Close the ControlPort connection
+     *
+     * @param out_onion On success, populated with the newly created v3 onion address.
+     *
+     * @return true if all steps succeeded and a syntactically valid onion address was returned,
+     *         false otherwise (no partial success is considered acceptable in tests).
+     *
+     * @note Why this exists: unit tests need to validate the full onion lifecycle,
+     *       but low-level methods (connectControl, authenticate, etc.) are private
+     *       by design to enforce encapsulation. This single orchestrated method
+     *       provides a safe, public way to exercise the internals without exposing
+     *       them directly or breaking encapsulation.
+     *
+     * @warning This method should be used in test contexts only. Production code
+     *          should call higher-level APIs (e.g., setupHiddenService) instead.
+     */
+    bool integrationTestAddOnion(std::string& out_onion);
+
 private:
     // ----- High-level steps (will hold real logic later) -----
 

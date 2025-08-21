@@ -3,34 +3,58 @@
 #include <memory>
 #include <string>
 #include "Protocol.hpp"
+#include "ConfigureTor.hpp"
+#include "HiddenService.hpp"
+#include "TorUnitTests.hpp"
 
 /*
- * @brief Holds configuration parameters and setup state for starting Tor.
+ * @brief Orchestrates the full startup pipeline for Tor.
  *
- * This class will evolve into the central structure containing
- * paths, ports, and other parameters needed to bootstrap Tor correctly.
+ * This class integrates configuration setup, Tor process startup,
+ * bootstrap monitoring, hidden service creation, and optional tests.
+ *
+ * Design goal: this header contains the full public contract so the .cpp
+ * can be implemented end-to-end without repeatedly editing the header.
  */
 
 class SetupStructure{
 public:
     SetupStructure();
 
-    // initialize default parameters
-    void initializeDefaults();
+    // --- Pipeline entrypoints ---
+    bool initialize(std::string& out_error);    // Prepare defaults, validate paths.
+    bool configureTor(std::string& out_error);  // Ensure torrc, binaries, directories.
+    bool startTor(std::string& out_error);      // Launch Tor process and wait for bootstrap.
+    bool setupHiddenService(std::string& out_error);    // Add onion service once Tor is running.
+    bool runDiagnostics();                      // Optionally call into TorUnitTests
+    void shutdown();                            // Cleanly tear down Tor + services.
 
-    // validate current configuration
-    bool validate(std::string& out_error) const;
+    // --- Utility
+    bool validate(std::string& out_error) const;    // validate current config.
+    void dumpConfiguration() const;                 // Log current config for debugging.
 
-    // log current configuration
-    void dumpConfiguration() const;
+    // --- Accessors
+    const std::string& onionAddress() const { return onionAddress_; }
+    const std::string& lastError() const {return lastError_; }
+    bool torRunning() const { return torRunning_; }
 
 private:
-    // members we will need later
-    int controlPort_;       // Tor control port (9051).
-    std::string torBinaryPath_; // Path Tor Binary
-    std::string dataDirectory_; // Directory for Tor's state
-    std::string cookieAuthFile_;    // Path to cookie file for authentication.
-    std::string logFile_;           // Path to Tor's log output.
+    // --- Configuration state ---
+    int controlPort_;                   // Tor control port (default: 9051).
+    std::string torBinaryPath_;         // Path to Tor binary.
+    std::string dataDirectory_;         // Tor's data directory.
+    std::string cookieAuthFile_;        // Cookie file for authentication.
+    std::string logFile_;               // path for Tor log.
+
+    // --- Subsystem handles
+    std::unique_ptr<ConfigureTor> configureTor_;        // Responsible for low-level Tor setup.
+    std::unique_ptr<HiddenServiceManager> hsManager_;   // Manages onion services.
+
+    // --- Runtime state
+    bool torRunning_;       // Whether Tor has been successfully started.
+    int torPid_;            // Process ID for spawned Tor (if managed directly)
+    std::string onionAddress_;  // The active onion service address, if created
+    std::string lastError_;     // Captures the last error string for diagnostics.
 };
 
 class TcpServer{

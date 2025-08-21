@@ -311,7 +311,7 @@ bool HiddenServiceManager::delOnion(){
 
     // Build and send DEL_ONION <ServiceID>\r\n. Tor replies with "250 OK" on success.
     std::vector<std::string> reply;
-    const std::string cmd = "DEL_ONION" + service_id_ + "\r\n";
+    const std::string cmd = "DEL_ONION " + service_id_ + "\r\n";
     if (!sendCommand(cmd, reply)){
         std::cerr << "[HiddenService] DEL_ONION failed for " << onionAddress() << std::endl;
         return false;
@@ -448,6 +448,7 @@ bool HiddenServiceManager::authenticate() {
 }
 
 // ------------------------- Private: low-level helpers (skeleton stubs) -------------------------
+
 
 bool HiddenServiceManager::sendCommand(const std::string& command, std::vector<std::string>& response_lines) {
     // Safety: caller must have connected first.

@@ -103,9 +103,9 @@ bool ConfigureTor::ensureTorrc(std::string& out_error) {
 
     // Collect directives we will enforce.
     std::ostringstream must;
-    must << "ControlPort" << settings_.control_port << "\n";
+    must << "ControlPort " << settings_.control_port << "\n";
     must << "CookieAuthentication 1\n";
-    must << "DataDirectory" << paths_.data_dir << "\n";
+    must << "DataDirectory " << paths_.data_dir << "\n";
     if (!paths_.cookie_path.empty()){
         must << "CookieAuthFile " << paths_.cookie_path << "\n";
         if (settings_.cookie_group_readable){
@@ -218,7 +218,7 @@ bool ConfigureTor::mkDirs0700(const std::string& p, std::string& out_error) {
                 ::mkdir(curr.c_str(), 0700);
             }
         }
-        if (::mkdir(p.c_str(),0700 != 0 && errno != EEXIST)){
+        if (::mkdir(p.c_str(),0700) != 0 && errno != EEXIST){
             out_error = "Failed to create directory: " + p + " (" + std::strerror(errno) + ")";
             return false;
         }

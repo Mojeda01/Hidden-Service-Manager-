@@ -11,8 +11,6 @@ static void report(const std::string& name, bool result, const std::string& msg 
     std::cout << std::endl;
 }
 
-
-
 void TorUnitTests::runAll() {
     report("setupHiddenService (stub)", testSetupHiddenServiceStub());
     report("addOnion (real)", testAddOnionReal());

@@ -12,16 +12,39 @@
  *        bootstrap monitoring, hidden service creation, and shutdown.
  */
 
-SetupStructure::SetupStructure() : controlPort_(9051), torRunning_(false), torPid_(-1), onionAddress_(), lastError_()
+SetupStructure::SetupStructure() :
+    controlPort_(9051),             // Default Tor ControlPort
+    torRunning_(false),             // Tor not started yet
+    torPid_(-1),                    // No PID known
+    onionAddress_(),                // Empty until addOnion() assigns
+    lastError_()                    // Empty until first error
 {
-    // Assign default values here - constructor should only set safe defaults.
+    // Tor binary path (macOS focus)
+    // on macOS, Tor is NOT installed in /usr/bin by default.
+    // Homebrew puts it under:
+    //  - Apple silicon (M1/M2):    /opt/homebrew/bin/tor
+    //  - Intel macs:               /usr/local/bin/tor
+    //
+    // We default to Apple Silicon because this project targets M1.
+    // NOTE: validate() / configureTor() will still confirm that the
+    // path is executable and can be adjusted at runtime if needed.
+    torBinaryPath_ = "/opt/homebrew/bin/tor";
+    // Alternative for Intel-based Macs:
+    // torBinaryPath_ = "/usr/local/bin/tor";
 
-    // Common default; adjust per system (THIS WILL NEED TO BE ADJUSTED FOR MAC AT SOME POINT).
-    torBinaryPath_      = "/usr/bin/tor";
+    // Tor runtime state & logs (project-local defaults)
+    //
+    // We use relative paths so that Tor writes its state into the
+    // project's working directory - easy to inspect and wipe between runs.
+    dataDirectory_  = "./tor_data";                                      // Tor state dir
+    cookieAuthFile_ = dataDirectory_ + "/control_auth_cookie";           // Auth cookie
+    logFile_        = "./tor.log";                                       // Tor runtime log
 
-    dataDirectory_      = "./tor_data";  // Local working directory for Tor state - also check later if this compatible with MAC M1.
-    cookieAuthFile_     = dataDirectory_ + "/control_auth_cookie";
-    logFile_            = "./tor.log";
+    // Constructor must stay side-effect free:
+    //  - Do not validate paths here.
+    //  - Do not create directories/files here.
+    //  - Do not attempt to spawn Tor here.
+    // Those belong in validate(), configureTor(), and startTor() respectively.
 }
 
 /*
@@ -50,8 +73,8 @@ bool SetupStructure::validate(std::string& out_error) const {
     constexpr int kMinPort = 1;
     constexpr int kMaxPort = 65535;
     if (controlPort_ < kMinPort || controlPort_ > kMaxPort) {
-        out_error = "ControlPort" + std::to_string(controlPort_) +
-                    " is out of range [" + std::to_string(kMinPort) + ", " + std::to_string(kMaxPort) + "].";
+        out_error = "ControlPort " + std::to_string(controlPort_) + " is out of range [" + std::to_string(kMinPort) +
+            ", " + std::to_string(kMaxPort) + "].";
         return false;
     }
 
@@ -121,12 +144,16 @@ bool SetupStructure::validate(std::string& out_error) const {
         }
     } else {
         const std::string parent = parentDirOf(dataDirectory_);
-        if (!isWritable(parent)) {
+        if (!dirExistsLocal(parent)) {
             out_error = "DataDirectory does not exist and its parent directory is missing: " + parent;
             return false;
         }
         if (!isWritable(parent)) {
             out_error = "DataDirectory does not exist and its parent directory is not writable: " + parent;
+            return false;
+        }
+        if (dataDirectory_ == "/"){
+            out_error = "DataDirectory cannot be '/'. Choose a project-local path.";
             return false;
         }
     }
@@ -135,8 +162,26 @@ bool SetupStructure::validate(std::string& out_error) const {
     // Tor will create the cookie file; we only ensure its parent is viable.
     if (!cookieAuthFile_.empty()){
         const std::string parent = parentDirOf(cookieAuthFile_);
-        if (dirExistsLocal(parent)){
+        if (!dirExistsLocal(parent)){
             out_error = "CookieAuthFile parent directory does not exist: " + parent;
+            return false;
+        }
+        if (!isWritable(parent)) {
+            out_error = "CookieAuthFile parent directory is not writable: " + parent;
+            return false;
+        }
+    }
+
+    // Log file parent directory (if configured)
+    // Tor will create/append the log file; we only ensure its parent is viable.
+    if (!logFile_.empty()){
+        const std::string parent = parentDirOf(logFile_);
+        if (!dirExistsLocal(parent)){
+            out_error = "Log file parent directory does not exist: " + parent;
+            return false;
+        }
+        if (!isWritable(parent)){
+            out_error = "Log file parent directory is not writable: " + parent;
             return false;
         }
     }

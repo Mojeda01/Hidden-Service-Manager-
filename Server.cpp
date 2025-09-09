@@ -216,8 +216,59 @@ bool SetupStructure::initialize(std::string& out_error) {
 
 /*
  * @brief Prepare torrc, directories, and other prerequisites.
+ *
+ * @details
+ *  This function transitions SetupStructure from a validated-but-idle state
+ *  into a configured state by delegating to ConfigureTor. It performs the
+ *  following steps:
+ *      (i)     Assemble ConfigureTor::Paths from SetupStrcture members.
+ *      (ii)    Assemble ConfigureTor::Settings with sane defaults.
+ *      (iii)   Construct a ConfigureTor instance and store it in configureTor_.
+ *      (iv)    Call ensureConfigured(), which:
+ *          - Validates or discovers Tor binary,
+ *          - Creates DataDirectory, cookie, and log dirs (0700 perms),
+ *          - Writes or appends torrc with required directives,
+ *          - Spawns Tor if ControlPort not already listening,
+ *          - Waits for cookie file and ControlPort readiness.
+ *
+ *  On failure, the precise error message is propagated into out_error
+ *  and cached in lastError_. On success, SetupStructure is ready for
+ *  startTor() to manage runtime.
+ *
+ *  @param[out] out_error   Filed with human-readabel reason if configuration fails.
+ *  @return true if configuration succeeded; false otherwise.
  */
 bool SetupStructure::configureTor(std::string& out_error) {
+
+    // Builds paths
+    ConfigureTor::Paths paths;
+    paths.tor_binary = torBinaryPath_;
+    paths.data_dir = dataDirectory_;
+    paths.cookie_path = cookieAuthFile_;
+    paths.log_file = logFile_;
+
+    // Decide where torrc should live.
+    // project-local default: inside DataDirectory for isolation.
+    paths.torrc_path = dataDirectory_ + "/torrc";
+
+    // Build settings
+    ConfigureTor::Settings settings;
+    settings.control_port = controlPort_;
+    settings.cookie_group_readable = true;          // dev Convenience
+    settings.append_if_exists = true;               // last-wins semantics
+    settings.cookie_timeout = std::chrono::seconds(10);
+    settings.connect_control_timeout = std::chrono::seconds(15);
+    settings.spawn_grace = std::chrono::seconds(1);
+
+    // Construct ConfigureTor instance
+    configureTor_ = std::make_unique<ConfigureTor>(paths, settings);
+
+    // Run configuration
+    if (!configureTor_->ensureConfigured(out_error)){
+        lastError_ = out_error; // cache the failure reason
+        return false;
+    }
+
     return true;
 }
 

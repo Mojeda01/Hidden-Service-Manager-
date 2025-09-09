@@ -159,15 +159,17 @@ public:
      */
     bool integrationTestAddOnion(std::string& out_onion);
 
+    bool connectControl();      // Open TCP connection to ControlPort.
+    bool authenticate();        // Send AUTHENTICATE based on selected mode.
+    bool closeControl();        // Close ControlPort connection.
+    bool waitBootstrapped();    // Poll GETINFO status/bootstrap-phase until done or timeout.
+
 private:
     // ----- High-level steps (will hold real logic later) -----
 
-    bool connectControl();      // Open TCP connection to ControlPort.
-    bool authenticate();        // Send AUTHENTICATE based on selected mode.
-    bool waitBootstrapped();    // Poll GETINFO status/bootstrap-phase until done or timeout.
     bool addOnion();            // Issue ADD_ONION (NEW:ED25519-V3 or ED25519-V3:<key>).
     bool delOnion();            // Issue DEL_ONION for the current service_id_.
-    bool closeControl();        // Close ControlPort connection.
+
 
     // ----- Low-level helpers (placeholders in skeleton) -----
     /*

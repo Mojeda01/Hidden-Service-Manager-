@@ -275,8 +275,93 @@ bool SetupStructure::configureTor(std::string& out_error) {
 
 /*
  * @brief Launch Tor and wait for bootstrap to complete.
+ *
+ * @details
+ *  This function ensures that Tor is alive and reachable after configuration.
+ *  Responsibilities are:
+ *      (i)     Verify configureTor() has been called and configureTor_ exists.
+ *
+ *      (ii)    Skip work if Tor is already marked as running (idempotent).
+ *
+ *      (iii)   Probe ControlPort to check if Tor is reachable; if not, retry
+ *              ensureConfigured() to spawn tor.
+ *
+ *      (iv)    Optionally poll bootstrap progress via HiddenServiceManager to ensure Tor
+ *              has fully initialized before declaring success.
+ *
+ *      (v)     On success, set torRunning_ and cache PID from ConfigureTor.
+ *
+ *  Errors are reported via out_error and cached in lastError_.
+ *
+ *  @param[out] out_error Filled with reason if Tor is not up.
+ *  @return true if Tor is running and ControlPort is ready; false otherwise.
  */
 bool SetupStructure::startTor(std::string& out_error) {
+    // Preconditions
+    if (!configureTor_){
+        out_error = "Tor not configured. Call configureTor() before startTor().";
+        lastError_ = out_error;
+        return false;
+    }
+
+    // Idempotency check
+    if (torRunning_){
+        return true;    // Already marked as running; nothing further needed.
+    }
+
+    // Probe ControlPort readiness
+    const auto& settings = configureTor_->settings();
+    const auto& paths = configureTor_->paths();
+
+    if (!ConfigureTor::probeTcpConnect("127.0.0.1", settings.control_port, std::chrono::milliseconds{500})){
+        // Controlport not open; try to re-run ensureConfigured to spawn Tor.
+        if (!configureTor_->ensureConfigured(out_error)){
+            lastError_ = out_error;
+            return false;
+        }
+    }
+
+    // Bootstrap wait
+    {
+        HiddenServiceManager::Config hs_cfg;
+        hs_cfg.enable_stub_mode = false;
+        hs_cfg.tor_control_host = "127.0.0.1";
+        hs_cfg.tor_control_port = settings.control_port;
+        hs_cfg.auth_mode = HiddenServiceManager::AuthMode::Cookie;
+        hs_cfg.tor_cookie_path = paths.cookie_path;
+
+        HiddenServiceManager hs_mgr(hs_cfg);
+
+        if (!hs_mgr.connectControl()){
+            out_error = "Failed to connect to Tor ControlPort after spawn.";
+            lastError_ = out_error;
+            return false;
+        }
+
+        if (!hs_mgr.authenticate()){
+            out_error = "Tor ControlPort authentication failed.";
+            lastError_ = out_error;
+            hs_mgr.closeControl();
+            return false;
+        }
+
+        if (!hs_mgr.waitBootstrapped()){
+            out_error = "Tor did not finish bootstrap within timeout.";
+            lastError_ = out_error;
+            hs_mgr.closeControl();
+            return false;
+        }
+        hs_mgr.closeControl();  // clean up temporary control session.
+    }
+
+    // Success: update runtime state
+    torRunning_ = true;
+
+    // If ConfigureTor spawned Tor, it tracked PID internally.
+    // We can't access it directly here unless ConfigureTor exposes it,
+    // So we leave torPid_ = -1 until you add a getter.
+    torPid_ = -1;
+
     return true;
 }
 

@@ -81,6 +81,14 @@ public:
     const Paths& paths() const noexcept { return paths_; }
     const Settings& settings() const noexcept { return settings_; }
 
+    /*
+    * @brief Blocking TCP connect probe with timeout, for IPv4/IPv6.
+    * @why  Static: no instance state; allows calls from const methods without const-casting.
+    */
+    static bool probeTcpConnect(const std::string& host,
+                                unsigned short port,
+                                std::chrono::milliseconds timeout_ms);
+
 private:
     // ---- Step helpers (single-responsibility; small & testable) ---
     /*
@@ -121,14 +129,6 @@ private:
     static bool mkDirs0700(const std::string& p, std::string& out_error);
     static bool isReadableFile(const std::string& p);
     static bool isExecutableFile(const std::string& p);
-
-    /*
-    * @brief Blocking TCP connect probe with timeout, for IPv4/IPv6.
-    * @why  Static: no instance state; allows calls from const methods without const-casting.
-    */
-    static bool probeTcpConnect(const std::string& host,
-                                unsigned short port,
-                                std::chrono::milliseconds timeout_ms);
 
     /*
     * @brief Canonical dirname helper (string-only; no std::filesystem dependency).

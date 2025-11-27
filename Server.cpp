@@ -393,9 +393,9 @@ bool SetupStructure::setupHiddenService(std::string& out_error) {
     HiddenServiceManager::Config cfg;
     
     // Local service side – keep defaults or wire to your TcpServer later.
-    cfg.local_bind_ip = "127.0.0.1";
-    cfg.local_service_port = 5000;        // or whatever your TcpServer uses
-    cfg.onion_virtual_port = 12345;       // external onion port
+    cfg.local_bind_ip = localBindIp_;
+    cfg.local_service_port = localServicePort_;        // or whatever your TcpServer uses
+    cfg.onion_virtual_port = onionVirtualPort_;       // external onion port
 
     // Tor ControlPort details: use Setupstructure members, not HiddenService defaults.
     cfg.tor_control_host = "127.0.0.1";

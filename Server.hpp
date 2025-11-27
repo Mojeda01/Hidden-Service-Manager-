@@ -38,6 +38,13 @@ public:
     const std::string& lastError() const {return lastError_; }
     bool torRunning() const { return torRunning_; }
 
+    // --- Ports
+    void setLocalServicePort(uint16_t p) { localServicePort_ = p; }
+    void setOnionVirtualPort(uint16_t p) { onionVirtualPort_ = p; }
+
+    // --- IP
+    void setLocalBindIp(std::string ip) { localBindIp_ = std::move(ip); }
+
 private:
     // --- Configuration state ---
     int controlPort_;                   // Tor control port (default: 9051).
@@ -45,6 +52,13 @@ private:
     std::string dataDirectory_;         // Tor's data directory.
     std::string cookieAuthFile_;        // Cookie file for authentication.
     std::string logFile_;               // path for Tor log.
+
+    // Localservice and OnionVirtual Port
+    uint16_t localServicePort_ = 5000;      // default same as now 
+    uint16_t onionVirtualPort_ = 12345;     // default same as now
+    
+    // IP
+    std::string localBindIp_ = "127.0.0.1";
 
     // --- Subsystem handles
     std::unique_ptr<ConfigureTor> configureTor_;        // Responsible for low-level Tor setup.

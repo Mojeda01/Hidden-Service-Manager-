@@ -369,6 +369,64 @@ bool SetupStructure::startTor(std::string& out_error) {
  * @brief Set up a hidden service once Tor is live.
  */
 bool SetupStructure::setupHiddenService(std::string& out_error) {
+    
+    // Make sure Tor is running (use your existing pipeline)
+    if (!torRunning_) {
+        if (!startTor(out_error)){
+            lastError_ = out_error;
+            return false;
+        }
+    }
+
+    // Idempotency -- if we already have a ready manager, reuse it
+    if (hsManager_ && hsManager_->isReady()){
+        onionAddress_ = hsManager_->onionAddress();
+        if (onionAddress_.empty()){
+            out_error = "HiddenServiceManager is ready but onionAddress() is empty.";
+            lastError_ = out_error;
+            return false;
+        }
+        return true;
+    }
+
+    // build HiddenServiceManager::Config tied to the ip to your Tor instance.
+    
+    // Local service side – keep defaults or wire to your TcpServer later.
+    // cfg.local_bind_ip = "127.0.0.1";
+    // cfg.local_service_port = 5000;        // or whatever your TcpServer uses
+    // cfg.onion_virtual_port = 12345;       // external onion port
+
+    // Tor ControlPort details: use Setupstructure members, not HiddenService defaults.
+    cfg.tor_control_host = "127.0.0.1";
+    cfg.tor_control_port = static_cast<std::uint16_t>(controlPort_);
+    cfg.auth_mode = HiddenServiceManager::AuthMode::Cookie;
+    cfg.tor_cookie_path = cookieAuthFile;
+
+    // real mode by default once ready
+    cfg.enable_stub_mode = false;
+
+    // tighten bootstrap timeout
+    cfg.bootstrap_timeout = std::chrono::milliseconds(15000);
+
+    // Create the manager and run setup
+    hsManager_ = std::make_unique<HiddenServiceManager>(cfg);
+
+    if (!hsManager_->setupHiddenService()){
+        out_error = "HiddenServiceManager::setupHiddenService() failed.";
+        lastError_ = out_error;
+        hsManager_.reset();
+        return false;
+    }
+
+    // Cache onion address in SetupStructure for callers
+    onionAddress_ = hsManager_->onionAddress();
+    if (onionAddress_.empty()){
+        out_error = "Hidden service reported success but onionAddress() is empty.";
+        lastError_ = out_error;
+        hsManager_.reset();
+        return false;
+    }
+    std::cout << "[Setup] Hidden service ready at " << onionAddress_ << "\n";
     return true;
 }
 
@@ -376,6 +434,7 @@ bool SetupStructure::setupHiddenService(std::string& out_error) {
  * @brief Run diagnostic tests if enabled.
  */
 bool SetupStructure::runDiagnostics() {
+    TorUnitTests::runAll();
     return true;
 }
 
@@ -383,5 +442,14 @@ bool SetupStructure::runDiagnostics() {
  * @brief Shut down Tor and cleanup resources.
  */
 void SetupStructure::shutdown() {
-
+    if (hsManager_){
+        if (!hsManager_->teardownHiddenService()){
+            std::cerr << "[Setup] Warning: teardownHiddenService() reported failure\n";
+        }
+        hsManager_.reset();
+    }
+    // currently down own Tor's lifetime explicitly,
+    // just mark state, do not try to kill the process by PID yet.
+    torRUnning_ = false;
+    onionAddress_.clear();
 }

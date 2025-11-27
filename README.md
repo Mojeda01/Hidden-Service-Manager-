@@ -1,4 +1,4 @@
-# Hidden-Service-Manager
+<h1 style="text-align:center;"> Hidden-Service-Manager </h1>
 
 [![Site](https://img.shields.io/badge/site-marco--oj.no-black)](https://marco-oj.no)
 [![Language](https://img.shields.io/badge/C%2B%2B-20-blue)](#build)

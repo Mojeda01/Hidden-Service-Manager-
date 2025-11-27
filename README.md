@@ -27,12 +27,12 @@ Requires:
 git clone https://github.com/Mojeda01/Hidden-Service-Manager.git
 cd Hidden-Service-Manager
 g++ -std=c++20 -O2 -o hsm main.cpp src/*.cpp
-
+```
 
 ## Usage
 In stub mode (no Tor needed):
 
-```
+```bash
 HiddenServiceManager::Config cfg;
 cfg.enable_stub_mode = true;
 

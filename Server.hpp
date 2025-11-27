@@ -85,6 +85,8 @@ public:
 
 private:
     int listeningPort_;         // TCP port this server listens on.
-    IProtocol* attachedProtocol_;   // Protocol handler (not owned).
+    int server_fd_ = -1;        // listening socket FD.
+    bool running_ = false;
+    IProtocol* attachedProtocol_ = nullptr;   // Protocol handler (not owned).
 
 };

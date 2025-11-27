@@ -2,9 +2,17 @@
 
 #include "Server.hpp"
 #include <iostream>
+
 #include <stdexcept>
 #include <unistd.h>
 #include <sys/stat.h>   // ::stat, struct stat, S_ISREG
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <cerrno>
+#include <cstring>
+
 
 /*
  * @file SetupStructure.cpp
@@ -45,6 +53,148 @@ SetupStructure::SetupStructure() :
     //  - Do not create directories/files here.
     //  - Do not attempt to spawn Tor here.
     // Those belong in validate(), configureTor(), and startTor() respectively.
+}
+
+/* TCP SERVER STRUCTURE */
+TcpServer::TcpServer(int port)
+    : listeningPort_(port){
+}
+
+void TcpServer::attachProtocol(IProtocol* protocol){
+    attachedProtocol_ = protocol;
+}
+
+void TcpServer::start(){
+    if (server_fd_ != -1){
+        std::cerr << "[Server] start(): already listening on port "
+                  << listeningPort_ << "\n";
+        return;
+    }
+
+    server_fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd_ < 0){
+        std::perror("[Server] socket");
+        server_fd_ = -1;
+        return;
+    }
+
+    int opt = 1;
+    if (::setsockopt(server_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0){
+        std::perror("[Server] setsockopt(SO_REUSEADDR)");
+        // non-fatal; keep going
+    }
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);   // bind on all local IFs
+    addr.sin_port = htons(static_cast<uint16_t>(listeningPort_));
+
+    if (::bind(server_fd_, reinterpret_cast<sockaddr*>(&addr),
+                sizeof(addr)) < 0){
+        std::perror("[Server] bind");
+        ::close(server_fd_);
+        server_fd_ = -1;
+        return;
+    }
+
+    if (::listen(server_fd_, 16) < 0){
+        std::perror("[Server] listen");
+        ::close(server_fd_);
+        server_fd_ = -1;
+        return;
+    }
+
+    running_ = true;
+    std::cout << "[Server] Listening on port " << listeningPort_ << "\n";
+}
+
+void TcpServer::run(){
+    // Convenience: if the caller forgot to call start(), do it here.
+    if (server_fd_ == -1){
+        start();
+        if (server_fd_ == -1){
+            std::cerr << "[Server] run(): start() failed; aborting loop.\n";
+            return;
+        }
+    }
+
+    if (!attachedProtocol_){
+        std::cerr << "[Server] run(): no protocol attached; will echo.\n";
+    }
+
+    while (running_){
+        sockaddr_in client_addr{};
+        socklen_t client_len = sizeof(client_addr);
+
+        int client_fd = ::accept(server_fd_, reinterpret_cast<sockaddr*>(&client_addr),
+                &client_len);
+
+        if (client_fd < 0){
+            if (errno == EINTR){
+                continue; // interrupted by signal, retry
+            }
+            if (!running_){
+                // likely shutting down
+                break;
+            }
+            std::perror("[Server] accept");
+            break;
+        }
+        char buffer[4096];
+        ssize_t n = ::recv(client_fd, buffer, sizeof(buffer), 0);
+        if (n <= 0){
+            if (n < 0){
+                std::perror("[Server] recv");
+            }
+            ::close(client_fd);
+            continue;
+        }
+        std::string incoming(buffer, buffer + n);
+        std::string outgoing;
+
+        if (attachedProtocol_){
+            std::string processed = attachedProtocol_->processIncoming(incoming);
+            outgoing = attachedProtocol_->prepareOutgoing(processed);
+        } else {
+            //fallback - simple echo
+            outgoing = incoming;
+        }
+        const char* data = outgoing.data();
+        std::size_t left = outgoing.size();
+        while(left > 0){
+            ssize_t written = ::send(client_fd, data, left, 0);
+            if (written <= 0){
+                if (written < 0){
+                    std::perror("[Server] send");
+                }
+                break;
+            }
+            data += written;
+            left -= static_cast<std::size_t>(written);
+        }
+        ::close(client_fd);
+    }
+
+    // if we ever leave the loop without stop() having closed the listener
+    // make sure the fd is not leaked.
+    if (server_fd_ != -1 && !running_){
+        ::close(server_fd_);
+        server_fd_=-1;
+    }
+}
+
+void TcpServer::stop(){
+    if (!running_ && server_fd_ == -1){
+        return;
+    }
+    running_ = false;
+
+    if (server_fd_ != -1){
+        ::shutdown(server_fd_, SHUT_RDWR); // wake up accept()
+        ::close(server_fd_);
+        server_fd_ = -1;
+    }
+    std::cout << "[Server] Stopped.\n";
 }
 
 /*

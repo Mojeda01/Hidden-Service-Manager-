@@ -390,17 +390,18 @@ bool SetupStructure::setupHiddenService(std::string& out_error) {
     }
 
     // build HiddenServiceManager::Config tied to the ip to your Tor instance.
+    HiddenServiceManager::Config cfg;
     
     // Local service side – keep defaults or wire to your TcpServer later.
-    // cfg.local_bind_ip = "127.0.0.1";
-    // cfg.local_service_port = 5000;        // or whatever your TcpServer uses
-    // cfg.onion_virtual_port = 12345;       // external onion port
+    cfg.local_bind_ip = "127.0.0.1";
+    cfg.local_service_port = 5000;        // or whatever your TcpServer uses
+    cfg.onion_virtual_port = 12345;       // external onion port
 
     // Tor ControlPort details: use Setupstructure members, not HiddenService defaults.
     cfg.tor_control_host = "127.0.0.1";
     cfg.tor_control_port = static_cast<std::uint16_t>(controlPort_);
     cfg.auth_mode = HiddenServiceManager::AuthMode::Cookie;
-    cfg.tor_cookie_path = cookieAuthFile;
+    cfg.tor_cookie_path = cookieAuthFile_;
 
     // real mode by default once ready
     cfg.enable_stub_mode = false;
@@ -450,6 +451,6 @@ void SetupStructure::shutdown() {
     }
     // currently down own Tor's lifetime explicitly,
     // just mark state, do not try to kill the process by PID yet.
-    torRUnning_ = false;
+    torRunning_ = false;
     onionAddress_.clear();
 }

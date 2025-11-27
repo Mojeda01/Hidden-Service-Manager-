@@ -1,5 +1,9 @@
 <h1 align="center">Hidden Service Manager</h1>
 
+<p align="center">
+  <img src="logo/logo.png" width="200">
+</p>
+
 [![Site](https://img.shields.io/badge/site-marco--oj.no-black)](https://marco-oj.no)
 [![Language](https://img.shields.io/badge/C%2B%2B-20-blue)](#build)
 [![Status](https://img.shields.io/badge/status-experimental-orange)](#status)
